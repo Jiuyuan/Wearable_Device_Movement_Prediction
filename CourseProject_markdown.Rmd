@@ -1,0 +1,235 @@
+---
+title: "Course Project of Pratical ML"
+author: "Jiuyuan"
+date: "July 21, 2019"
+output:
+  html_document: default
+  pdf_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, cache = TRUE)
+```
+
+## BACKGROUND
+
+This is an R Markdown document for the course project of Pratical ML. Training and Testing dataset are given. The training data is shown as below.
+
+```{r pml.training}
+pml.training <- read.csv("~/Documents/Practical_ML/CourseProject/pml-training.csv")
+```
+
+## PROJECT GOAL
+
+Predict the manner in which they did the exercise. The variable to be predicted is "classe" (Col. 160) in the data. Any combination of the other variables could be used.
+
+## PART 0 - DATA CLEANING AND PARTITION
+
+Since there are a lot of meaningless data in the given training set, to make it eaiser in the following steps, a data cleaning is performed as below. All columns with NA or #DIV/0! are removed.
+```{r removeNA}
+pml.training[pml.training == "#DIV/0!"] <- NA
+pml.training <- pml.training[, colSums(is.na(pml.training)) == 0]
+dim.data.frame(pml.training)
+```
+60 variables are left for our analysis in the following steps.
+
+There are also some variables that are not numerics left which may trouble our numeric analysis later. So, there columns are moved to the very end of the data.
+
+```{r}
+pml.training.factors <- pml.training[, unlist(lapply(pml.training, is.factor))]
+pml.training.numerics <- pml.training[, unlist(lapply(pml.training, is.numeric))]
+pml.training<- cbind(pml.training.numerics, pml.training.factors)
+```
+
+Then split the cleaned data into training sets and varification sets.
+```{r partition}
+library(ggplot2)
+library(lattice)
+library(caret)
+set.seed(1414)
+inTrain <- createDataPartition(pml.training$classe, p = 3/4)[[1]];
+training <- pml.training[inTrain,]
+verifying <- pml.training[-inTrain,]
+```
+
+The partition used here was simple bootstrap resampling. Note that, the "verifying" set is equivalent to the "testing" set in lectures, and the "pml.testing" is for the implementation of the prediction(s).
+
+## PART 1 - DATA PREPROCESS
+
+#### 1.1 Understand Correlations
+
+It is almost imposible to know the physical meaning of all the descripters, but it is possible to find correlation from the data.
+
+```{r cor}
+checkCor <- cor(training[, unlist(lapply(training, is.numeric))])
+findCorrelation(checkCor, cutoff = 0.95)
+findCorrelation(checkCor, cutoff = 0.75)
+```
+We see that there are some descripters are highly related to each other. a training set with reduced correlation is prepared.
+
+```{r reducedCor}
+highlyCorDes <- findCorrelation(checkCor, cutoff = 0.95)
+training2 <- training[,-highlyCorDes]
+```
+
+#### 1.2 PCA
+
+60 is still a relatively large number to perform ML models directly. So, firstly, a preprocess using Principle Components Analysis is performed on numeric variables in "training".
+
+```{r preProcess}
+checkPCA <- prcomp(training[, unlist(lapply(training, is.numeric))], scale = TRUE)
+chartPCA <- summary(checkPCA)$importance
+plot(chartPCA[3,], xlab="Principal component", 
+                   ylab="Cumulative Proportion of variance explained", 
+                   ylim=c(0,1), type='b')
+```
+
+The plot shown above indicates that if using a threshold of 0.95, we will leave 29 principle components for next steps. This cuts the variable pool to half (using "training"). We can do PCA similarly for less correlated training set ("training2"):
+
+```{r prePorcess_2}
+checkPCA2 <- prcomp(training2[, unlist(lapply(training2, is.numeric))], scale = TRUE)
+chartPCA2 <- summary(checkPCA2)$importance
+plot(chartPCA2[3,], xlab="Principal component", 
+                   ylab="Cumulative Proportion of variance explained", 
+                   ylim=c(0,1), type='b')
+```
+
+The result is slitely different than above. Effect of using PCA or not will be check in PART 2. 
+
+## PART 2 - TRAINING
+
+Following the bootstrap resampling from PART 0, two training methods were used and compared in this part.
+
+#### 2.1 Random Forest
+```{r rf_fit}
+set.seed(858)
+rfFit1 <- train(classe ~., data = training, method = "rf")
+rfFit2 <- train(classe ~., data = training, preProcess = "pca", method = "rf")
+```
+
+Using the "verifying" set to check the performance of the two fits:
+
+```{r rf_predict_1}
+rfPredict1 <- predict(rfFit1, newdata = verifying)
+confusionMatrix(rfPredict1, verifying$classe)$table
+```
+```{r}
+confusionMatrix(rfPredict1, verifying$classe)$overall
+```
+
+Random Forest without preprocess gives a 100% accuracy. Most likely, this model is over fitted.
+
+```{r rf_predict_2}
+rfPredict2 <- predict(rfFit2, newdata = verifying)
+confusionMatrix(rfPredict2, verifying$classe)$table
+```
+
+```{r}
+confusionMatrix(rfPredict2, verifying$classe)$overall
+```
+
+With preprocessing with PCA, the accuracy of random forrest decreased to 0.9882. This is an acceptable value.
+
+#### 2.2 Support Vector Machines
+
+```{r svm_fit}
+svmFit1 <- train(classe ~., data = training, method = "svmLinear3")
+svmFit2 <- train(classe ~., data = training, method = "svmLinear3", preProcess = "pca")
+```
+
+Using the "verifying" set to check the performance of the two fits:
+
+```{r svm predict_1}
+svmPredict1 <- predict(svmFit1, newdata = verifying)
+confusionMatrix(svmPredict1, verifying$classe)$table
+```
+
+```{r}
+confusionMatrix(svmPredict1, verifying$classe)$overall
+```
+
+```{r svm predict_2}
+svmPredict2 <- predict(svmFit2, newdata = verifying)
+confusionMatrix(svmPredict2, verifying$classe)$table
+```
+
+```{r}
+confusionMatrix(svmPredict2, verifying$classe)$overall
+```
+
+#### 2.3 Combining Predictors
+
+An overview of rfPredict2 and svmPredict2:
+
+```{r compare}
+qplot(rfPredict2, svmPredict2, color = classe, data = verifying)
+```
+
+The plot shows the consistence of the two predictions, as well as their errors by looking at the color of the dots. Predictions on level A and E are generally more consitant than B, C, or D for the two models.
+
+(1) A LogitBoost method is used for prediction based on a combination of rfPredict2 and svmPredict2:
+
+```{r combo}
+predDF <- data.frame(rfPredict2, svmPredict2, classe = verifying$classe)
+comboFit <- train(classe ~., data = predDF, method = "LogitBoost")
+comboPredict <- predict(comboFit, predDF)
+confusionMatrix(comboPredict, predDF$classe)$table
+```
+
+```{r}
+confusionMatrix(comboPredict, predDF$classe)$overall
+```
+The accuracy slightly increased from 0.9882 (rfPredict2) to 0.9891 (comboPredict). Further increase maybe hinded by the lost of information at rfFit2.
+
+(2) Another random forest is used for prediciton based on a combination of rfPredict2 and svmPredict2.
+
+```{r combo_2}
+comboFit2 <- train(classe ~., data = predDF, method = "rf")
+comboPredict2 <- predict(comboFit2, predDF)
+confusionMatrix(comboPredict2, predDF$classe)$table
+```
+
+```{r}
+confusionMatrix(comboPredict2, predDF$classe)$overall
+```
+
+## PART 3 - PREDICTION
+
+In this part, pml.testing was loaded to predict the performance of the participants using the models trained in PRT 2.
+
+Cleaning of the data set:
+```{r clean_test}
+pml.testing <- read.csv("~/Documents/Practical_ML/CourseProject/pml-testing.csv")
+pml.testing[pml.testing == "#DIV/0!"] <- NA
+pml.testing <- pml.testing[, colSums(is.na(pml.testing)) == 0]
+
+pml.testing.factors <- pml.testing[, unlist(lapply(pml.testing, is.factor))]
+pml.testing.numerics <- pml.testing[, unlist(lapply(pml.testing, is.numeric))]
+pml.testing<- cbind(pml.testing.numerics, pml.testing.factors)
+
+dim.data.frame(pml.testing)
+```
+
+Do the final predictions using rfFit2, svmFit2, and then ComboFit and ComboFit2:
+```{r}
+finalPredict.rf <- predict(rfFit2, pml.testing)
+finalPredict.svm <- predict(svmFit2, pml.testing)
+finalPredictDF <- data.frame(rfPredict2 = finalPredict.rf, svmPredict2 = finalPredict.svm)
+finalPredict.combo <- predict(comboFit, finalPredictDF)
+finalPredict.combo2 <- predict(comboFit2, finalPredictDF)
+```
+
+```{r}
+finalPredict.rf
+```
+```{r}
+finalPredict.svm
+```
+```{r}
+finalPredict.combo
+```
+```{r}
+finalPredict.combo2
+```
+
+The comboFit trained using logitBoost is having trouble predicting all the B levels of the performance. Currently not sure about what happened. Result of Combo2 is used for the quiz.
