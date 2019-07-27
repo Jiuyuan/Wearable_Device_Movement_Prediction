@@ -3,8 +3,11 @@ title: "Course Project of Pratical ML"
 author: "Jiuyuan"
 date: "July 21, 2019"
 output:
-  html_document: default
+  html_document: 
+    toc: yes
   pdf_document: default
+editor_options: 
+  chunk_output_type: console
 ---
 
 ```{r setup, include=FALSE}
@@ -101,10 +104,14 @@ The result is slitely different than above. Effect of using PCA or not will be c
 Following the bootstrap resampling from PART 0, two training methods were used and compared in this part.
 
 #### 2.1 Random Forest
-```{r rf_fit}
+```{r rf_fit_1}
 set.seed(858)
 rfFit1 <- train(classe ~., data = training, method = "rf")
+rfFit1
+```
+```{r rf_fit_2}
 rfFit2 <- train(classe ~., data = training, preProcess = "pca", method = "rf")
+rfFit2
 ```
 
 Using the "verifying" set to check the performance of the two fits:
